@@ -1,0 +1,602 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2024 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "string.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+//#define BUTMAX 4
+#define FLOORMAX 3
+#define DECREASE 10
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim2;
+
+UART_HandleTypeDef huart2;
+
+/* USER CODE BEGIN PV */
+uint16_t led_pin_up[] = {LEDUP1_Pin,LEDUP2_Pin,0};
+uint16_t led_pin_down[] = {0,LEDDN2_Pin,LEDDN3_Pin};
+uint16_t led_pin_f[] = {LEDF1_Pin,LEDF2_Pin,LEDF3_Pin};
+GPIO_TypeDef *led_port_up[] = {LEDUP1_GPIO_Port,LEDUP2_GPIO_Port,0};
+GPIO_TypeDef *led_port_down[] = {0,LEDDN2_GPIO_Port,LEDDN3_GPIO_Port};
+GPIO_TypeDef *led_port_f[] = {LEDF1_GPIO_Port,LEDF2_GPIO_Port,LEDF3_GPIO_Port};
+
+
+int upButton[FLOORMAX] = {0};//up down button state outside
+int downButton[FLOORMAX]={0};
+int fButton[FLOORMAX] = {0};//floor button state inside
+int direction = 1;//1: up 2: down
+int currentFloor=0;
+int targetFloor=0;
+int velocity=1000;
+int motorState = 0;//0:stop  1:run
+
+//uint8_t sen1 = "SENSOR1\n";
+//uint8_t sen2 = "SENSOR2\n";
+//uint8_t sen3 = "SENSOR3\n";
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_USART2_UART_Init(void);
+static void MX_TIM2_Init(void);
+/* USER CODE BEGIN PFP */
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+void input_button(){
+  if(HAL_GPIO_ReadPin(SWUP1_GPIO_Port,SWUP1_Pin)){//up1
+	   	HAL_Delay(100);
+	   	HAL_GPIO_WritePin(LEDUP1_GPIO_Port,LEDUP1_Pin,!upButton[0]);
+	   	upButton[0] = !upButton[0];
+	  	while(HAL_GPIO_ReadPin(SWUP1_GPIO_Port,SWUP1_Pin)){;}
+	  	HAL_Delay(100);
+	  }
+
+  if(HAL_GPIO_ReadPin(SWUP2_GPIO_Port,SWUP2_Pin)){//up2
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LEDUP2_GPIO_Port,LEDUP2_Pin,!upButton[1]);
+    upButton[1] = !upButton[1];
+    while(HAL_GPIO_ReadPin(SWUP2_GPIO_Port,SWUP2_Pin)){;}
+    HAL_Delay(100);
+  }
+
+  if(HAL_GPIO_ReadPin(SWDN2_GPIO_Port,SWDN2_Pin)){//down2
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LEDDN2_GPIO_Port,LEDDN2_Pin,!downButton[1]);
+    downButton[1] = !downButton[1];
+    while(HAL_GPIO_ReadPin(SWDN2_GPIO_Port,SWDN2_Pin)){;}
+    HAL_Delay(100);
+  }
+
+  if(HAL_GPIO_ReadPin(SWDN3_GPIO_Port,SWDN3_Pin)){//down3
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LEDDN3_GPIO_Port,LEDDN3_Pin,!downButton[2]);
+    downButton[2] = !downButton[2];
+    while(HAL_GPIO_ReadPin(SWDN3_GPIO_Port,SWDN3_Pin)){;}
+    HAL_Delay(100);
+  }
+
+  if(HAL_GPIO_ReadPin(SWF1_GPIO_Port,SWF1_Pin)){//f1
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LEDF1_GPIO_Port,LEDF1_Pin,!fButton[0]);
+    fButton[0] = !fButton[0];
+    while(HAL_GPIO_ReadPin(SWF1_GPIO_Port,SWF1_Pin)){;}
+    HAL_Delay(100);
+  }
+
+  if(HAL_GPIO_ReadPin(SWF2_GPIO_Port,SWF2_Pin)){//f2
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LEDF2_GPIO_Port,LEDF2_Pin,!fButton[1]);
+    fButton[1] = !fButton[1];
+    while(HAL_GPIO_ReadPin(SWF2_GPIO_Port,SWF2_Pin)){;}
+    HAL_Delay(100);
+  }
+
+  if(HAL_GPIO_ReadPin(SWF3_GPIO_Port,SWF3_Pin)){//f3
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LEDF3_GPIO_Port,LEDF3_Pin,!fButton[2]);
+    fButton[2] = !fButton[2];
+    while(HAL_GPIO_ReadPin(SWF3_GPIO_Port,SWF3_Pin)){;}
+    HAL_Delay(100);
+  }
+}
+void motor_up(int ccrValue){
+	motorState = 1;
+	HAL_GPIO_WritePin(IN1_GPIO_Port, IN1_Pin, 1);
+	HAL_GPIO_WritePin(IN2_GPIO_Port, IN2_Pin, 0);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccrValue);
+}
+void motor_down(int ccrValue){//ccr_value control pwm duty cycle but not complete
+	motorState = 1;
+	HAL_GPIO_WritePin(IN1_GPIO_Port, IN1_Pin, 0);
+	HAL_GPIO_WritePin(IN2_GPIO_Port, IN2_Pin, 1);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccrValue);
+}
+void motor_stop(){
+  motorState = 0;
+	HAL_GPIO_WritePin(IN1_GPIO_Port, IN1_Pin, 0);
+	HAL_GPIO_WritePin(IN2_GPIO_Port, IN2_Pin, 0);
+}
+
+void upbutton_check(){
+  int i=0;
+  if(upButton[currentFloor-1]){
+    upButton[currentFloor-1] = 0;
+    HAL_GPIO_WritePin(led_port_up[currentFloor-1],led_pin_up[currentFloor-1],0);
+    HAL_Delay(1000);
+  }
+  if(fButton[currentFloor-1]){
+    fButton[currentFloor-1]=0;
+    HAL_GPIO_WritePin(led_port_f[currentFloor-1],led_pin_f[currentFloor-1],0);
+    HAL_Delay(1000);
+  }
+  for(i=currentFloor;i<FLOORMAX-1;i++){
+    if(upButton[i] || fButton[i]){
+      targetFloor = i + 1;
+      break;
+    }
+  }
+  direction = 2;
+}
+void downbutton_check(){
+	int i=0;
+  if(downButton[currentFloor-1]){
+    downButton[currentFloor-1] = 0;
+    HAL_GPIO_WritePin(led_port_up[currentFloor-1],led_pin_up[currentFloor-1],0);
+    HAL_Delay(1000);
+  }
+  if(fButton[currentFloor-1]){
+    fButton[currentFloor-1]=0;
+    HAL_GPIO_WritePin(led_port_f[currentFloor-1],led_pin_f[currentFloor-1],0);
+    HAL_Delay(1000);
+  }
+  for(i=currentFloor-2;i>0;i--){//if statement 2�?????
+    if(downButton[i] || fButton[i]){
+      targetFloor = i + 1;
+      break;
+    }
+  }
+  direction=1;
+}
+void led_check(){//when arrive in target floor, related led off
+  if(direction==1){
+    if(upButton[currentFloor-1]){
+      upButton[currentFloor-1] = 0;
+      HAL_GPIO_WritePin(led_port_up[currentFloor-1],led_pin_up[currentFloor-1],0);
+    }
+  }else if(direction==2){
+    if(downButton[currentFloor-1]){
+      downButton[currentFloor-1] = 0;
+      HAL_GPIO_WritePin(led_port_down[currentFloor-1],led_pin_down[currentFloor-1],0);
+    }
+  }
+  if(fButton[currentFloor-1]){
+      fButton[currentFloor-1] = 0;
+      HAL_GPIO_WritePin(led_port_f[currentFloor-1],led_pin_f[currentFloor-1],0);
+  }
+}
+void moveToFloor(int targetFloor){//move to targetfloor
+  if(targetFloor > currentFloor){
+    motor_up(velocity);
+    direction = 1;
+  }else if(targetFloor == currentFloor){
+    velocity -= DECREASE;//choose value for simulation
+    if(velocity<=0){
+      motor_stop();
+      led_check();
+    }
+  }else{
+    motor_down(velocity);
+    direction = 2;
+  }
+}
+void test_correct(){
+//	HAL_GPIO_WritePin(IN1_GPIO_Port, IN1_Pin, 0);
+//	HAL_GPIO_WritePin(IN2_GPIO_Port, IN2_Pin, 1);
+//	//__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 1000);
+////		HAL_Delay(2000);
+//  while(duty < autoReload) {
+//
+//		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ++duty);
+//              HAL_Delay(100);
+//              snprintf(buffer, sizeof(buffer), "%03d\n", duty);
+//             HAL_UART_Transmit(&huart2, buffer, strlen(buffer), 100);
+//          }
+//
+//      while(duty > 0) {
+//             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, --duty);
+//              HAL_Delay(100);
+//              snprintf(buffer, sizeof(buffer), "%03d\n", duty);
+//              HAL_UART_Transmit(&huart2, buffer, strlen(buffer), 100);
+//       }
+}
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
+int main(void)
+{
+
+  /* USER CODE BEGIN 1 */
+	//uint16_t value = 0;
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* Configure the system clock */
+  SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_USART2_UART_Init();
+  MX_TIM2_Init();
+  /* USER CODE BEGIN 2 */
+ HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+ int i=0;
+
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1){//HAL_UART_Transmit(&huart2,"SENSOR\n",sizeof("SENSOR\n"),100);//HAL_UART_Transmit(&huart2,"dn3\n",sizeof("dn3\n"),100);
+//    input_button();
+//    if(!motorState){
+//      if(direction==1){
+//        upbutton_check();
+//      }else if(direction==2){
+//        downbutton_check();
+//      }
+//    }
+//    moveToFloor(targetFloor);
+	  while(i < 2000){
+		  motor_up(++i);
+		  HAL_Delay(1);
+	  }
+	  HAL_Delay(1000);
+	  while(i > 1000){
+		  motor_down(--i);
+		  HAL_Delay(1);
+	  }
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+  }
+  /* USER CODE END 3 */
+}
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 36-1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 2000-1;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 1000-1;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPIO_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+/* USER CODE BEGIN MX_GPIO_Init_1 */
+/* USER CODE END MX_GPIO_Init_1 */
+
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, LEDUP1_Pin|LEDUP2_Pin|LEDDN2_Pin|LEDDN3_Pin
+                          |LEDF2_Pin|LEDF1_Pin|LEDF3_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, IN1_Pin|IN2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : LEDUP1_Pin LEDUP2_Pin LEDDN2_Pin LEDDN3_Pin
+                           LEDF2_Pin LEDF1_Pin */
+  GPIO_InitStruct.Pin = LEDUP1_Pin|LEDUP2_Pin|LEDDN2_Pin|LEDDN3_Pin
+                          |LEDF2_Pin|LEDF1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LD2_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SENSOR3_Pin SENSOR2_Pin SENSOR1_Pin */
+  GPIO_InitStruct.Pin = SENSOR3_Pin|SENSOR2_Pin|SENSOR1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SWF3_Pin SWF2_Pin */
+  GPIO_InitStruct.Pin = SWF3_Pin|SWF2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SWF1_Pin SWDN3_Pin SWDN2_Pin SWUP2_Pin
+                           SWUP1_Pin */
+  GPIO_InitStruct.Pin = SWF1_Pin|SWDN3_Pin|SWDN2_Pin|SWUP2_Pin
+                          |SWUP1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LEDF3_Pin */
+  GPIO_InitStruct.Pin = LEDF3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LEDF3_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : IN1_Pin IN2_Pin */
+  GPIO_InitStruct.Pin = IN1_Pin|IN2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+/* USER CODE BEGIN MX_GPIO_Init_2 */
+/* USER CODE END MX_GPIO_Init_2 */
+}
+
+/* USER CODE BEGIN 4 */
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	//if(GPIO_Pin == SW0_Pin){
+		//HAL_Delay(100);
+//		if(GPIO_Pin == SW0_Pin){
+//			  if(led_state[0] == 1){
+//				  led_state[0] = 0;
+//				  HAL_UART_Transmit(&huart2,"A\n",sizeof("A\n"),100);
+//			  }
+//			  else{
+//				  led_state[0] = 1;
+//				  HAL_UART_Transmit(&huart2,"B\n",sizeof("A\n"),100);
+//			  }
+//		}
+
+	  //HAL_GPIO_TogglePin(LED0_GPIO_Port, LED0_Pin);
+	  //HAL_Delay(10);
+  //}
+
+	if(GPIO_Pin == SENSOR1_Pin ){
+		 HAL_UART_Transmit(&huart2,"SENSOR1111\n",sizeof("SENSOR1111\n"),100);
+		 currentFloor=1;
+	}
+	if(GPIO_Pin == SENSOR2_Pin ){
+		HAL_UART_Transmit(&huart2,"SENSOR2222\n",sizeof("SENSOR2222\n"),100);
+		currentFloor=2;
+	}
+	if(GPIO_Pin == SENSOR3_Pin ){
+		HAL_UART_Transmit(&huart2,"SENSOR3333\n",sizeof("SENSOR3333\n"),100);
+		currentFloor=3;
+	}
+}
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+
+#ifdef  USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */

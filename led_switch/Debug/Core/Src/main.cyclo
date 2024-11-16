@@ -1,0 +1,17 @@
+../Core/Src/main.c:89:6:input_button	15
+../Core/Src/main.c:146:5:button_check	19
+../Core/Src/main.c:184:6:led_check	8
+../Core/Src/main.c:220:6:motor_on	5
+../Core/Src/main.c:257:6:motor_off	1
+../Core/Src/main.c:265:6:motor_delay	2
+../Core/Src/main.c:281:6:up_floor	7
+../Core/Src/main.c:333:6:down_floor	7
+../Core/Src/main.c:385:6:go_floor	3
+../Core/Src/main.c:395:6:update_currentFloor	5
+../Core/Src/main.c:418:5:main	2
+../Core/Src/main.c:472:6:SystemClock_Config	3
+../Core/Src/main.c:512:13:MX_TIM2_Init	4
+../Core/Src/main.c:557:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:590:13:MX_GPIO_Init	1
+../Core/Src/main.c:668:6:HAL_GPIO_EXTI_Callback	1
+../Core/Src/main.c:707:6:Error_Handler	1
